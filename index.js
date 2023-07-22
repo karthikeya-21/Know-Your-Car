@@ -44,9 +44,9 @@ const {name,brand,year,price,rating,fuel,engine,power,drivetrain,acceleration,se
     let car={
         name: name,
         brand: brand,
-        year: parseInt(year),
-        price: parseFloat(price),
-        rating:parseFloat(rating),
+        year: year,
+        price: price,
+        rating:rating,
         specificatios:{
             fuel:fuel,
             engine:engine,
