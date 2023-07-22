@@ -8,9 +8,9 @@ app.set("view engine","ejs");
 app.use(express.urlencoded({extended:true}));
 
 
-// const url="mongodb+srv://admin:root@cluster0.8prkxvt.mongodb.net/?retryWrites=true&w=majority";
+const url="mongodb+srv://admin:root@cluster0.8prkxvt.mongodb.net/?retryWrites=true&w=majority";
 
-const url="mongodb://127.0.0.1:27017";
+// const url="mongodb://127.0.0.1:27017";
 
 const storage = multer.diskStorage({
     destination: function (req, file, cb) {
