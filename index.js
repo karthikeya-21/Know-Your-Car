@@ -8,9 +8,9 @@ app.set("view engine","ejs");
 app.use(express.urlencoded({extended:true}));
 
 
-const url="mongodb+srv://admin:root@cluster0.8prkxvt.mongodb.net/?retryWrites=true&w=majority";
+// const url="mongodb+srv://admin:root@cluster0.8prkxvt.mongodb.net/?retryWrites=true&w=majority";
 
-// const url="mongodb://127.0.0.1:27017";
+const url="mongodb://127.0.0.1:27017";
 
 const storage = multer.diskStorage({
     destination: function (req, file, cb) {
@@ -76,7 +76,53 @@ app.get('/', async (req,res)=>{
     }catch(err){
         console.error(err);
     }
-})
+});
+
+app.get('/update/:name',async (req,res)=>{
+    let collection=await getcollection();
+    var data=await collection.findOne({name:req.params.name});
+    // console.log(data);
+    if(data.length==0){
+        res.end("No data found with this name;")
+    }
+    res.render("update",{data:data});
+});
+
+
+app.get('/name/:name',async (req,res)=>{
+    let collection=await getcollection();
+    let data=await collection.findOne({name:req.params.name});
+    console.log(data);
+    if(data.length==0){
+        res.end("Data not found with the given Name");
+    }
+    res.json(data);
+});
+
+app.get('/brand/:brand',async(req,res)=>{
+
+    let collection=await getcollection();
+    let data=await collection.find({brand:req.params.brand}).toArray();
+    console.log(data);
+    if(data.length==0){
+        res.end("No data Found with the given brand");
+    }
+    res.send(data);
+
+});
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 app.listen(8000,()=>{
     console.log("Listening at localhost:8000");
