@@ -79,7 +79,7 @@ app.get('/update/:name',async (req,res)=>{
 
 app.get('/name/:name',async (req,res)=>{
     let collection=await getcollection();
-    let data=await collection.findOne({name:req.params.name});
+    let data=await collection.find({name:req.params.name}).toArray();
     console.log(data);
     if(data.length==0){
         res.end("Data not found with the given Name");
