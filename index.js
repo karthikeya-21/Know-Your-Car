@@ -91,9 +91,9 @@ app.get('/name/:name',async (req,res)=>{
     let collection=await getcollection();
     let data=await collection.find({name:req.params.name}).toArray();
     console.log(data);
-    if(data.length==0){
-        res.end("Data not found with the given Name");
-    }
+    // if(data.length==0){
+    //     res.end("Data not found with the given Name");
+    // }
     res.json(data);
 });
 
@@ -103,12 +103,12 @@ app.get('/brand/:brand',async(req,res)=>{
     // console.log(req.params.brand);
     let data=await collection.find({brand:req.params.brand}).toArray();
     // console.log(data);
-    if(data.length==0){
-        res.send("No data Found with the given brand");
-    }
-    else{
+    // if(data.length==0){
+    //     res.end();
+    // }
+    // else{
         res.send(data);
-    }
+    // }
     res.end();
 });
 
