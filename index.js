@@ -20,14 +20,23 @@ async function getcollection(){
         console.error(err);
     }
 }   
+async function getbrandcollection(){
+    try{
+    const client=new MongoClient(url,{ useUnifiedTopology: true });
+    client.connect();
+    return client.db('knowyourcar').collection('brands');
+    }catch(err){
+        console.error(err);
+    }
+}   
 
 app.get("/insert",(req,res)=>{
     res.render("index");
 });
 
 app.post("/insert", upload.single('image'),async (req,res)=>{
-    const imageFile = req.file.buffer;
-    const {name,brand,year,price,rating,fuel,engine,power,drivetrain,acceleration,seating}=req.body;
+    // const imageFile = req.file.buffer;
+    const {name,brand,year,price,rating,fuel,engine,power,drivetrain,acceleration,seating,image}=req.body;
 
     let car={
         name: name,
@@ -43,12 +52,13 @@ app.post("/insert", upload.single('image'),async (req,res)=>{
             acceleration:acceleration,
             seating:seating,
         },
-        image:new Binary(imageFile),
+        // image:new Binary(imageFile),
+        Image:image,
         };
     try{
     let collection=await getcollection();
     let result=await collection.insertOne(car);
-    res.redirect('/');
+    res.redirect('/insert');
     }catch(err){
         console.error(err);
     }
@@ -90,15 +100,51 @@ app.get('/name/:name',async (req,res)=>{
 app.get('/brand/:brand',async(req,res)=>{
 
     let collection=await getcollection();
+    // console.log(req.params.brand);
     let data=await collection.find({brand:req.params.brand}).toArray();
-    console.log(data);
+    // console.log(data);
     if(data.length==0){
-        res.end("No data Found with the given brand");
+        res.send("No data Found with the given brand");
     }
-    res.send(data);
-
+    else{
+        res.send(data);
+    }
+    res.end();
 });
 
+app.get('/brand',(req,res)=>{
+    res.render("brand");
+});
+
+app.use(express.urlencoded({extended:true}));
+app.post("/insertbrand",async (req,res)=>{
+    const {brand,logo}=req.body;
+    console.log(req.body);
+    let newbrand={
+        brand: brand,
+        logo:logo,
+    }
+    try{
+        let collection=await getbrandcollection();
+        let result=await collection.insertOne(newbrand);
+        if(result){
+            res.redirect('/brand');
+        }
+
+    }catch(err){
+        res.end(err);
+    }
+});
+
+app.get('/getbrands', async (req,res)=>{
+    try{
+        let collection=await getbrandcollection();
+        let result=await collection.find({}).toArray();
+        return res.json(result);
+    }catch(err){
+        console.log(err);
+    }
+});
 
 
 
