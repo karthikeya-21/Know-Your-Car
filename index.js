@@ -89,7 +89,10 @@ app.get('/update/:name',async (req,res)=>{
 
 app.get('/name/:name',async (req,res)=>{
     let collection=await getcollection();
-    let data=await collection.find({name:req.params.name}).toArray();
+    const name = req.params.name;
+        // Use a regular expression to perform a partial match on the name
+    const regex = new RegExp(name, 'i');
+    let data=await collection.find({name:regex}).toArray();
     console.log(data);
     // if(data.length==0){
     //     res.end("Data not found with the given Name");
