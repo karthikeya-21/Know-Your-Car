@@ -20,6 +20,17 @@ async function getcollection(){
         console.error(err);
     }
 }   
+
+async function getaboutcollection(){
+    try{
+    const client=new MongoClient(url,{ useUnifiedTopology: true });
+    client.connect();
+    return client.db('knowyourcar').collection('about');
+    }catch(err){
+        console.error(err);
+    }
+}   
+
 async function getbrandcollection(){
     try{
     const client=new MongoClient(url,{ useUnifiedTopology: true });
@@ -28,7 +39,7 @@ async function getbrandcollection(){
     }catch(err){
         console.error(err);
     }
-}   
+}
 
 app.get("/insert",(req,res)=>{
     res.render("index");
@@ -150,17 +161,18 @@ app.get('/getbrands', async (req,res)=>{
 });
 
 
-
-
-
-
-
-
-
-
+app.get('/about_us',async (req,res)=>{
+    try{
+        let collection=await getaboutcollection();
+        let aboutdata = await collection.find({}).toArray();
+        res.json(aboutdata);
+    }catch(err){
+        console.log(err);
+    }
+});
 
 const port=8000;
 
 app.listen(port, () => {
     console.log(`Server is running on http://localhost:${port}`);
-  });
+});
