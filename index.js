@@ -9,7 +9,7 @@ const app = express();
 app.set("view engine", "ejs");
 app.use(express.urlencoded({ extended: true }));
 
-// Multer — store in memory so we can stream to Cloudinary
+// Multer — memory storage so we can stream to Cloudinary
 const upload = multer({
     storage: multer.memoryStorage(),
     limits: { fileSize: 10 * 1024 * 1024 }, // 10MB max
@@ -48,12 +48,11 @@ function getCollection(name) {
     return db.collection(name);
 }
 
+// ─── Helpers ───────────────────────────────────────────────────────────────────
+
 /**
- * Upload a buffer to Cloudinary with background removal.
- * @param {Buffer} buffer   - image buffer from multer
- * @param {string} folder   - 'cars' or 'brands'
- * @param {string} publicId - slugified filename
- * @returns {Promise<string>} secure_url of the uploaded image
+ * Upload a buffer to Cloudinary with background_removal enabled.
+ * Returns the public_id and initial secure_url.
  */
 function uploadToCloudinary(buffer, folder, publicId) {
     return new Promise((resolve, reject) => {
@@ -61,21 +60,81 @@ function uploadToCloudinary(buffer, folder, publicId) {
             {
                 folder,
                 public_id: publicId,
-                overwrite: false,
-                background_removal: 'cloudinary_ai', // built-in AI BG removal
+                overwrite: true,
+                background_removal: 'cloudinary_ai',
             },
             (error, result) => {
                 if (error) return reject(error);
-                resolve(result.secure_url);
+                resolve(result);
             }
         );
 
-        // Pipe buffer into the upload stream
         const readable = new Readable();
         readable.push(buffer);
         readable.push(null);
         readable.pipe(uploadStream);
     });
+}
+
+/**
+ * Poll Cloudinary every 2s until background_removal is 'complete'.
+ * Resolves with the final secure_url (PNG with transparent BG).
+ * Rejects if it times out after `timeoutMs` milliseconds.
+ */
+function waitForBgRemoval(publicId, timeoutMs = 30000) {
+    return new Promise((resolve, reject) => {
+        const interval = 2000; // poll every 2s
+        const deadline = Date.now() + timeoutMs;
+
+        const poll = async () => {
+            if (Date.now() > deadline) {
+                return reject(new Error('Background removal timed out after 30s.'));
+            }
+
+            try {
+                // Fetch the resource info including background_removal status
+                const resource = await cloudinary.api.resource(publicId, {
+                    quality_analysis: false,
+                    image_metadata: false,
+                });
+
+                const bgStatus = resource?.info?.background_removal?.cloudinary_ai?.status;
+                console.log(`[BG Removal] ${publicId} → status: ${bgStatus}`);
+
+                if (bgStatus === 'complete') {
+                    // Build the final URL — Cloudinary stores the result as a PNG
+                    const finalUrl = cloudinary.url(publicId, {
+                        secure: true,
+                        format: 'png',
+                    });
+                    return resolve(finalUrl);
+                } else if (bgStatus === 'failed') {
+                    // BG removal failed — fall back to original image URL
+                    console.warn(`[BG Removal] Failed for ${publicId}, using original.`);
+                    return resolve(resource.secure_url);
+                }
+
+                // Still pending — wait and try again
+                setTimeout(poll, interval);
+            } catch (err) {
+                reject(err);
+            }
+        };
+
+        // Start first poll after a short initial delay
+        setTimeout(poll, interval);
+    });
+}
+
+/**
+ * Full flow: upload → wait for BG removal → return final URL.
+ */
+async function uploadWithBgRemoval(buffer, folder, slug) {
+    const result = await uploadToCloudinary(buffer, folder, slug);
+    console.log(`[Cloudinary] Uploaded: ${result.public_id}`);
+    const finalUrl = await waitForBgRemoval(result.public_id);
+    console.log(`[Cloudinary] BG removed: ${finalUrl}`);
+    return finalUrl;
 }
 
 // ─── Routes ────────────────────────────────────────────────────────────────────
@@ -93,11 +152,8 @@ app.post("/insert", upload.single('image'), async (req, res) => {
     }
 
     try {
-        const imageUrl = await uploadToCloudinary(
-            req.file.buffer,
-            'cars',
-            name.replace(/\s+/g, '_').toLowerCase()
-        );
+        const slug = name.replace(/\s+/g, '_').toLowerCase();
+        const imageUrl = await uploadWithBgRemoval(req.file.buffer, 'cars', slug);
 
         await getCollection('cars').insertOne({
             name, brand, year, price, rating,
@@ -142,13 +198,9 @@ app.post('/update/:name', upload.single('image'), async (req, res) => {
             specifications: { fuel, engine, power, drivetrain, acceleration, seating },
         };
 
-        // Only re-upload if a new image was provided
         if (req.file) {
-            updatedCar.image = await uploadToCloudinary(
-                req.file.buffer,
-                'cars',
-                name.replace(/\s+/g, '_').toLowerCase()
-            );
+            const slug = name.replace(/\s+/g, '_').toLowerCase();
+            updatedCar.image = await uploadWithBgRemoval(req.file.buffer, 'cars', slug);
         }
 
         await getCollection('cars').updateOne(
@@ -192,11 +244,8 @@ app.post("/insertbrand", upload.single('logo'), async (req, res) => {
     if (!req.file) return res.status(400).send("Brand logo is required.");
 
     try {
-        const logoUrl = await uploadToCloudinary(
-            req.file.buffer,
-            'brands',
-            brand.replace(/\s+/g, '_').toLowerCase()
-        );
+        const slug = brand.replace(/\s+/g, '_').toLowerCase();
+        const logoUrl = await uploadWithBgRemoval(req.file.buffer, 'brands', slug);
 
         await getCollection('brands').insertOne({ brand, logo: logoUrl });
         res.redirect('/brand');
