@@ -1,6 +1,6 @@
 require('dotenv').config();
 const express = require("express");
-const { MongoClient } = require("mongodb");
+const { MongoClient, ObjectId } = require("mongodb");
 const multer = require('multer');
 const cloudinary = require('cloudinary').v2;
 const { Readable } = require('stream');
@@ -12,7 +12,7 @@ app.use(express.urlencoded({ extended: true }));
 // Multer — memory storage so we can stream to Cloudinary
 const upload = multer({
     storage: multer.memoryStorage(),
-    limits: { fileSize: 10 * 1024 * 1024 }, // 10MB max
+    limits: { fileSize: 10 * 1024 * 1024 },
     fileFilter: (req, file, cb) => {
         if (!file.mimetype.startsWith('image/')) {
             return cb(new Error('Only image files are allowed.'));
@@ -48,12 +48,8 @@ function getCollection(name) {
     return db.collection(name);
 }
 
-// ─── Helpers ───────────────────────────────────────────────────────────────────
+// ─── Cloudinary Helpers ────────────────────────────────────────────────────────
 
-/**
- * Upload a buffer to Cloudinary with background_removal enabled.
- * Returns the public_id and initial secure_url.
- */
 function uploadToCloudinary(buffer, folder, publicId) {
     return new Promise((resolve, reject) => {
         const uploadStream = cloudinary.uploader.upload_stream(
@@ -68,7 +64,6 @@ function uploadToCloudinary(buffer, folder, publicId) {
                 resolve(result);
             }
         );
-
         const readable = new Readable();
         readable.push(buffer);
         readable.push(null);
@@ -76,59 +71,38 @@ function uploadToCloudinary(buffer, folder, publicId) {
     });
 }
 
-/**
- * Poll Cloudinary every 2s until background_removal is 'complete'.
- * Resolves with the final secure_url (PNG with transparent BG).
- * Rejects if it times out after `timeoutMs` milliseconds.
- */
 function waitForBgRemoval(publicId, timeoutMs = 30000) {
     return new Promise((resolve, reject) => {
-        const interval = 2000; // poll every 2s
+        const interval = 2000;
         const deadline = Date.now() + timeoutMs;
 
         const poll = async () => {
             if (Date.now() > deadline) {
                 return reject(new Error('Background removal timed out after 30s.'));
             }
-
             try {
-                // Fetch the resource info including background_removal status
                 const resource = await cloudinary.api.resource(publicId, {
                     quality_analysis: false,
                     image_metadata: false,
                 });
-
                 const bgStatus = resource?.info?.background_removal?.cloudinary_ai?.status;
                 console.log(`[BG Removal] ${publicId} → status: ${bgStatus}`);
 
                 if (bgStatus === 'complete') {
-                    // Build the final URL — Cloudinary stores the result as a PNG
-                    const finalUrl = cloudinary.url(publicId, {
-                        secure: true,
-                        format: 'png',
-                    });
-                    return resolve(finalUrl);
+                    return resolve(cloudinary.url(publicId, { secure: true, format: 'png' }));
                 } else if (bgStatus === 'failed') {
-                    // BG removal failed — fall back to original image URL
                     console.warn(`[BG Removal] Failed for ${publicId}, using original.`);
                     return resolve(resource.secure_url);
                 }
-
-                // Still pending — wait and try again
                 setTimeout(poll, interval);
             } catch (err) {
                 reject(err);
             }
         };
-
-        // Start first poll after a short initial delay
         setTimeout(poll, interval);
     });
 }
 
-/**
- * Full flow: upload → wait for BG removal → return final URL.
- */
 async function uploadWithBgRemoval(buffer, folder, slug) {
     const result = await uploadToCloudinary(buffer, folder, slug);
     console.log(`[Cloudinary] Uploaded: ${result.public_id}`);
@@ -137,7 +111,22 @@ async function uploadWithBgRemoval(buffer, folder, slug) {
     return finalUrl;
 }
 
-// ─── Routes ────────────────────────────────────────────────────────────────────
+/**
+ * Extract the Cloudinary public_id from a secure_url.
+ * e.g. https://res.cloudinary.com/demo/image/upload/v123/cars/toyota.png → cars/toyota
+ */
+function extractPublicId(url) {
+    try {
+        const parts = url.split('/upload/');
+        // Strip version segment (v1234567/) if present, then strip file extension
+        const withoutVersion = parts[1].replace(/^v\d+\//, '');
+        return withoutVersion.replace(/\.[^/.]+$/, '');
+    } catch {
+        return null;
+    }
+}
+
+// ─── Car Routes ────────────────────────────────────────────────────────────────
 
 app.get("/insert", (req, res) => res.render("index"));
 
@@ -147,9 +136,7 @@ app.post("/insert", upload.single('image'), async (req, res) => {
     if (!name || !brand || !year || !price || !rating || !fuel || !engine || !power || !drivetrain || !acceleration || !seating) {
         return res.status(400).send("All fields are required.");
     }
-    if (!req.file) {
-        return res.status(400).send("Car image is required.");
-    }
+    if (!req.file) return res.status(400).send("Car image is required.");
 
     try {
         const slug = name.replace(/\s+/g, '_').toLowerCase();
@@ -214,6 +201,31 @@ app.post('/update/:name', upload.single('image'), async (req, res) => {
     }
 });
 
+// DELETE car by ID — also deletes image from Cloudinary
+app.delete('/car/:id', async (req, res) => {
+    try {
+        const collection = getCollection('cars');
+        const car = await collection.findOne({ _id: new ObjectId(req.params.id) });
+
+        if (!car) return res.status(404).json({ error: "Car not found." });
+
+        // Delete image from Cloudinary if it exists
+        if (car.image) {
+            const publicId = extractPublicId(car.image);
+            if (publicId) {
+                await cloudinary.uploader.destroy(publicId);
+                console.log(`[Cloudinary] Deleted image: ${publicId}`);
+            }
+        }
+
+        await collection.deleteOne({ _id: new ObjectId(req.params.id) });
+        res.json({ success: true, message: `${car.name} deleted.` });
+    } catch (err) {
+        console.error("Delete car error:", err);
+        res.status(500).json({ error: "Failed to delete car: " + err.message });
+    }
+});
+
 app.get('/name/:name', async (req, res) => {
     try {
         const regex = new RegExp(req.params.name, 'i');
@@ -234,6 +246,8 @@ app.get('/brand/:brand', async (req, res) => {
         res.status(500).send("Failed to fetch brand cars.");
     }
 });
+
+// ─── Brand Routes ──────────────────────────────────────────────────────────────
 
 app.get('/brand', (req, res) => res.render("brand"));
 
@@ -265,6 +279,33 @@ app.get('/getbrands', async (req, res) => {
     }
 });
 
+// DELETE brand by ID — also deletes logo from Cloudinary
+app.delete('/brand/:id', async (req, res) => {
+    try {
+        const collection = getCollection('brands');
+        const brand = await collection.findOne({ _id: new ObjectId(req.params.id) });
+
+        if (!brand) return res.status(404).json({ error: "Brand not found." });
+
+        // Delete logo from Cloudinary if it exists
+        if (brand.logo) {
+            const publicId = extractPublicId(brand.logo);
+            if (publicId) {
+                await cloudinary.uploader.destroy(publicId);
+                console.log(`[Cloudinary] Deleted logo: ${publicId}`);
+            }
+        }
+
+        await collection.deleteOne({ _id: new ObjectId(req.params.id) });
+        res.json({ success: true, message: `${brand.brand} deleted.` });
+    } catch (err) {
+        console.error("Delete brand error:", err);
+        res.status(500).json({ error: "Failed to delete brand: " + err.message });
+    }
+});
+
+// ─── Other Routes ──────────────────────────────────────────────────────────────
+
 app.get('/about_us', async (req, res) => {
     try {
         const aboutdata = await getCollection('about').find({}).toArray();
@@ -275,7 +316,7 @@ app.get('/about_us', async (req, res) => {
     }
 });
 
-// ─── Start ──────────────────────────────────────────────────────────────────────
+// ─── Start ─────────────────────────────────────────────────────────────────────
 
 const port = process.env.PORT || 8000;
 
