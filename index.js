@@ -4,9 +4,10 @@ const { MongoClient, ObjectId } = require("mongodb");
 const multer = require('multer');
 const cloudinary = require('cloudinary').v2;
 const { Readable } = require('stream');
-
+const cors = require('cors'); // 1. Require the package
 const app = express();
 app.set("view engine", "ejs");
+app.use(cors());
 app.use(express.urlencoded({ extended: true }));
 
 // Multer — memory storage so we can stream to Cloudinary
